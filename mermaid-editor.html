@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mermaid Editor</title>
+
+<!-- Mermaid.js -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+
+<!-- CodeMirror 6 -->
+<script type="module">
+import { EditorState } from 'https://esm.sh/@codemirror/state@6';
+import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from 'https://esm.sh/@codemirror/view@6';
+import { defaultKeymap, indentWithTab } from 'https://esm.sh/@codemirror/commands@6';
+import { StreamLanguage } from 'https://esm.sh/@codemirror/language@6';
+import { oneDark } from 'https://esm.sh/@codemirror/theme-one-dark@6';
+
+// Simple Mermaid language highlight mode
+const mermaidMode = StreamLanguage.define({
+  name: 'mermaid',
+  token(stream) {
+    if (stream.match(/^%%.*$/)) { stream.skipToEnd(); return 'comment'; }
+    if (stream.match(/^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|journey|gitGraph|mindmap|timeline|quadrantChart|xychart-beta|block-beta|packet-beta|architecture-beta|requirementDiagram|C4Context|C4Container|C4Component|C4Dynamic|C4Deployment)\b/)) return 'keyword';
+    if (stream.match(/\b(subgraph|end|participant|actor|activate|deactivate|note|loop|alt|else|opt|par|critical|break|rect|autonumber|class|state|section|title|dateFormat|axisFormat|excludes|includes|todayMarker|clickHandler|click|style|linkStyle|classDef|direction|LR|RL|TB|BT|TD)\b/)) return 'keyword';
+    if (stream.match(/-->|==>|-.->|===>|o--o|<-->|\|>|\[|\]|\{|\}|\(|\)/)) return 'operator';
+    if (stream.match(/"[^"]*"/)) return 'string';
+    if (stream.match(/'[^']*'/)) return 'string';
+    if (stream.match(/\[[^\]]*\]/)) return 'string';
+    if (stream.match(/\([^)]*\)/)) return 'string';
+    if (stream.match(/\d+/)) return 'number';
+    stream.next();
+    return null;
+  }
+});
+
+const EXAMPLES = {
+  flowchart: `flowchart LR
+    A[Start] --> B{Entscheidung?}
+    B -->|Ja| C[Aktion A]
+    B -->|Nein| D[Aktion B]
+    C --> E[Ende]
+    D --> E`,
+
+  sequence: `sequenceDiagram
+    participant Browser
+    participant Server
+    participant DB
+    Browser->>Server: GET /api/data
+    Server->>DB: SELECT * FROM items
+    DB-->>Server: Ergebnisse
+    Server-->>Browser: JSON Response
+    Browser->>Browser: UI aktualisieren`,
+
+  class: `classDiagram
+    class Animal {
+      +String name
+      +int age
+      +makeSound() void
+    }
+    class Dog {
+      +String breed
+      +fetch() void
+    }
+    class Cat {
+      +bool isIndoor
+      +purr() void
+    }
+    Animal <|-- Dog
+    Animal <|-- Cat`,
+
+  state: `stateDiagram-v2
+    [*] --> Idle
+    Idle --> Processing : Start
+    Processing --> Success : OK
+    Processing --> Error : Fehler
+    Success --> Idle : Reset
+    Error --> Idle : Retry
+    Error --> [*] : Abbrechen`,
+
+  er: `erDiagram
+    CUSTOMER ||--o{ ORDER : places
+    CUSTOMER {
+        int id PK
+        string name
+        string email
+    }
+    ORDER ||--|{ LINE_ITEM : contains
+    ORDER {
+        int id PK
+        date created_at
+        string status
+    }
+    LINE_ITEM {
+        int id PK
+        int quantity
+        float price
+    }`,
+
+  gantt: `gantt
+    title Projektplan
+    dateFormat  YYYY-MM-DD
+    section Phase 1
+    Konzept           :done,    des1, 2024-01-01, 7d
+    Design            :active,  des2, 2024-01-08, 5d
+    section Phase 2
+    Entwicklung       :         dev1, 2024-01-13, 10d
+    Testing           :         test1, after dev1, 5d
+    section Phase 3
+    Deployment        :         dep1, after test1, 3d`,
+
+  pie: `pie title Technologie-Stack
+    "TypeScript" : 40
+    "Python" : 25
+    "Go" : 20
+    "Rust" : 10
+    "Sonstige" : 5`,
+
+  git: `gitGraph
+    commit id: "Initial"
+    branch feature/auth
+    checkout feature/auth
+    commit id: "Add login"
+    commit id: "Add logout"
+    checkout main
+    merge feature/auth
+    branch hotfix
+    checkout hotfix
+    commit id: "Fix bug"
+    checkout main
+    merge hotfix`,
+
+  mindmap: `mindmap
+  root((Mermaid))
+    Diagramme
+      Flowchart
+      Sequence
+      Class
+      State
+    Features
+      Live Preview
+      Export
+      Themes
+    Export
+      SVG
+      PNG`,
+
+  timeline: `timeline
+    title Entwicklungsgeschichte
+    2019 : Mermaid 8.0
+    2020 : ER-Diagramme
+         : Gantt verbessert
+    2021 : GitGraph
+    2022 : Mindmap
+         : Timeline
+    2023 : Mermaid 10.0
+         : ESM Support`
+};
+
+let editorView;
+let isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+let renderTimeout;
+let zoomLevel = 1;
+let panX = 0, panY = 0;
+let isPanning = false, panStartX = 0, panStartY = 0, panStartPanX = 0, panStartPanY = 0;
+
+function createEditor(content, dark) {
+  const extensions = [
+    lineNumbers(),
+    highlightActiveLine(),
+    drawSelection(),
+    mermaidMode,
+    keymap.of([
+      ...defaultKeymap,
+      indentWithTab,
+      { key: 'Ctrl-Enter', run: () => { renderDiagram(); return true; } }
+    ]),
+    EditorView.updateListener.of(update => {
+      if (update.docChanged) scheduleRender();
+    }),
+    EditorView.lineWrapping,
+  ];
+  if (dark) extensions.push(oneDark);
+
+  return new EditorView({
+    state: EditorState.create({ doc: content, extensions }),
+    parent: document.getElementById('editor-container')
+  });
+}
+
+function scheduleRender() {
+  clearTimeout(renderTimeout);
+  renderTimeout = setTimeout(renderDiagram, 300);
+}
+
+async function renderDiagram() {
+  const code = editorView.state.doc.toString();
+  const preview = document.getElementById('preview');
+  const errorBox = document.getElementById('error-box');
+  const diagramType = document.getElementById('diagram-type');
+
+  localStorage.setItem('mermaid-code', code);
+
+  const type = detectDiagramType(code);
+  diagramType.textContent = type || '—';
+
+  try {
+    errorBox.style.display = 'none';
+    preview.innerHTML = '';
+
+    const id = 'mermaid-' + Date.now();
+    const { svg } = await mermaid.render(id, code);
+    preview.innerHTML = svg;
+    applyTransform();
+  } catch (e) {
+    const msg = e.message || String(e);
+    const clean = msg.replace(/\[.*?\]/g, '').trim();
+    errorBox.textContent = '⚠ ' + clean;
+    errorBox.style.display = 'block';
+  }
+}
+
+function detectDiagramType(code) {
+  const first = code.trim().split('\n')[0].trim().toLowerCase();
+  const types = ['flowchart','graph','sequencediagram','classdiagram','statediagram','erdiagram','gantt','pie','journey','gitgraph','mindmap','timeline','quadrantchart','xychart','block','packet','architecture','requirementdiagram','c4context','c4container','c4component'];
+  for (const t of types) {
+    if (first.startsWith(t)) return first.split(/\s/)[0];
+  }
+  return null;
+}
+
+function applyTransform() {
+  const svg = document.querySelector('#preview svg');
+  if (!svg) return;
+  svg.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
+  svg.style.transformOrigin = 'top left';
+  document.getElementById('zoom-label').textContent = Math.round(zoomLevel * 100) + '%';
+}
+
+function resetView() {
+  zoomLevel = 1; panX = 0; panY = 0;
+  applyTransform();
+}
+
+async function exportSVG() {
+  const svg = document.querySelector('#preview svg');
+  if (!svg) return;
+  const blob = new Blob([svg.outerHTML], { type: 'image/svg+xml' });
+  download(URL.createObjectURL(blob), 'diagram.svg');
+}
+
+async function exportPNG() {
+  const svg = document.querySelector('#preview svg');
+  if (!svg) return;
+
+  const svgData = new XMLSerializer().serializeToString(svg);
+  const canvas = document.createElement('canvas');
+  const scale = 2;
+  const w = svg.viewBox.baseVal.width || svg.clientWidth || 800;
+  const h = svg.viewBox.baseVal.height || svg.clientHeight || 600;
+  canvas.width = w * scale;
+  canvas.height = h * scale;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.fillStyle = isDark ? '#1e1e2e' : '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+
+  const img = new Image();
+  const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData);
+  img.onload = () => {
+    ctx.drawImage(img, 0, 0);
+    download(canvas.toDataURL('image/png'), 'diagram.png');
+  };
+  img.src = url;
+}
+
+function download(url, filename) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+}
+
+function setTheme(dark) {
+  isDark = dark;
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  document.getElementById('theme-btn').textContent = dark ? '☀ Hell' : '☾ Dunkel';
+  mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', securityLevel: 'loose' });
+  // Rebuild editor
+  const code = editorView.state.doc.toString();
+  editorView.destroy();
+  document.getElementById('editor-container').innerHTML = '';
+  editorView = createEditor(code, dark);
+  renderDiagram();
+}
+
+function loadExample(name) {
+  const code = EXAMPLES[name];
+  if (!code) return;
+  editorView.dispatch({
+    changes: { from: 0, to: editorView.state.doc.length, insert: code }
+  });
+  document.getElementById('examples-dropdown').value = '';
+}
+
+// Split pane drag
+let isResizing = false;
+function initSplitPane() {
+  const divider = document.getElementById('divider');
+  const container = document.getElementById('main-container');
+
+  divider.addEventListener('mousedown', e => {
+    isResizing = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!isResizing) return;
+    const rect = container.getBoundingClientRect();
+    const ratio = ((e.clientX - rect.left) / rect.width) * 100;
+    const clamped = Math.max(20, Math.min(80, ratio));
+    document.getElementById('editor-pane').style.width = clamped + '%';
+    document.getElementById('preview-pane').style.width = (100 - clamped) + '%';
+    divider.style.left = clamped + '%';
+  });
+
+  document.addEventListener('mouseup', () => {
+    isResizing = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+}
+
+// Pan & Zoom
+function initPanZoom() {
+  const preview = document.getElementById('preview');
+
+  preview.addEventListener('wheel', e => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    zoomLevel = Math.max(0.1, Math.min(10, zoomLevel * delta));
+    applyTransform();
+  }, { passive: false });
+
+  preview.addEventListener('mousedown', e => {
+    if (e.button !== 1 && !e.altKey) return;
+    e.preventDefault();
+    isPanning = true;
+    panStartX = e.clientX;
+    panStartY = e.clientY;
+    panStartPanX = panX;
+    panStartPanY = panY;
+    preview.style.cursor = 'grabbing';
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!isPanning) return;
+    panX = panStartPanX + (e.clientX - panStartX);
+    panY = panStartPanY + (e.clientY - panStartY);
+    applyTransform();
+  });
+
+  document.addEventListener('mouseup', () => {
+    isPanning = false;
+    document.getElementById('preview').style.cursor = '';
+  });
+}
+
+// Init
+document.addEventListener('DOMContentLoaded', () => {
+  mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default', securityLevel: 'loose' });
+  setTheme(isDark);
+
+  const saved = localStorage.getItem('mermaid-code') || EXAMPLES.flowchart;
+  editorView = createEditor(saved, isDark);
+
+  document.getElementById('theme-btn').addEventListener('click', () => setTheme(!isDark));
+  document.getElementById('export-svg').addEventListener('click', exportSVG);
+  document.getElementById('export-png').addEventListener('click', exportPNG);
+  document.getElementById('reset-view').addEventListener('click', resetView);
+  document.getElementById('zoom-in').addEventListener('click', () => { zoomLevel = Math.min(10, zoomLevel * 1.2); applyTransform(); });
+  document.getElementById('zoom-out').addEventListener('click', () => { zoomLevel = Math.max(0.1, zoomLevel / 1.2); applyTransform(); });
+  document.getElementById('examples-dropdown').addEventListener('change', e => loadExample(e.target.value));
+
+  initSplitPane();
+  initPanZoom();
+  renderDiagram();
+});
+</script>
+
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f5f7;
+    --surface: #ffffff;
+    --surface2: #f0f0f5;
+    --border: #d1d1d6;
+    --text: #1c1c1e;
+    --text2: #636366;
+    --accent: #0071e3;
+    --accent-hover: #0077ed;
+    --error-bg: #fff0f0;
+    --error-text: #cc0000;
+    --toolbar-bg: #ffffff;
+    --divider: #c7c7cc;
+    --shadow: 0 1px 3px rgba(0,0,0,0.12);
+  }
+
+  [data-theme="dark"] {
+    --bg: #1c1c1e;
+    --surface: #2c2c2e;
+    --surface2: #3a3a3c;
+    --border: #48484a;
+    --text: #f2f2f7;
+    --text2: #aeaeb2;
+    --accent: #0a84ff;
+    --accent-hover: #409cff;
+    --error-bg: #2c1a1a;
+    --error-text: #ff6b6b;
+    --toolbar-bg: #2c2c2e;
+    --divider: #48484a;
+    --shadow: 0 1px 3px rgba(0,0,0,0.4);
+  }
+
+  html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+  }
+
+  /* Toolbar */
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: var(--toolbar-bg);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    flex-wrap: wrap;
+    z-index: 10;
+    height: 48px;
+  }
+
+  #toolbar .logo {
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--accent);
+    margin-right: 8px;
+    white-space: nowrap;
+  }
+
+  #toolbar .sep {
+    width: 1px;
+    height: 22px;
+    background: var(--border);
+    margin: 0 4px;
+  }
+
+  button, select {
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    padding: 5px 10px;
+    transition: background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+  }
+
+  button:hover, select:hover { background: var(--surface2); border-color: var(--accent); }
+
+  button.primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  button.primary:hover { background: var(--accent-hover); }
+
+  select { padding-right: 6px; }
+
+  #diagram-badge {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+    color: var(--text2);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  #diagram-type {
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--surface2);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+  }
+
+  /* Main layout */
+  #main-container {
+    display: flex;
+    height: calc(100vh - 48px);
+    position: relative;
+  }
+
+  #editor-pane {
+    width: 45%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+  }
+
+  #editor-header {
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text2);
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  #editor-hint { font-weight: 400; font-size: 11px; color: var(--text2); }
+
+  #editor-container {
+    flex: 1;
+    overflow: auto;
+    font-size: 13px;
+  }
+
+  /* CodeMirror overrides */
+  .cm-editor { height: 100%; }
+  .cm-editor .cm-scroller { overflow: auto; font-family: 'Menlo', 'Consolas', 'Monaco', monospace; }
+
+  /* Divider */
+  #divider {
+    position: absolute;
+    top: 0;
+    width: 6px;
+    height: 100%;
+    left: 45%;
+    transform: translateX(-50%);
+    cursor: col-resize;
+    z-index: 5;
+    background: transparent;
+    transition: background 0.15s;
+  }
+  #divider:hover, #divider.active { background: var(--accent); opacity: 0.4; }
+  #divider::after {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 0;
+    width: 2px;
+    height: 100%;
+    background: var(--divider);
+  }
+
+  /* Preview pane */
+  #preview-pane {
+    width: 55%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  #preview-header {
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text2);
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  #zoom-controls { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+  #zoom-label { font-size: 11px; color: var(--text2); min-width: 36px; text-align: center; }
+
+  #preview-controls button {
+    padding: 3px 7px;
+    font-size: 12px;
+    border-radius: 4px;
+  }
+
+  #error-box {
+    display: none;
+    margin: 10px 12px;
+    padding: 10px 14px;
+    background: var(--error-bg);
+    color: var(--error-text);
+    border: 1px solid var(--error-text);
+    border-radius: 8px;
+    font-family: 'Menlo', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    flex-shrink: 0;
+  }
+
+  #preview {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding: 20px;
+    cursor: default;
+    position: relative;
+  }
+
+  #preview svg {
+    max-width: none;
+    display: block;
+    filter: drop-shadow(0 2px 8px rgba(0,0,0,0.1));
+  }
+
+  /* Responsive */
+  @media (max-width: 700px) {
+    #main-container { flex-direction: column; }
+    #editor-pane, #preview-pane { width: 100% !important; height: 50%; }
+    #divider { display: none; }
+    #toolbar { height: auto; }
+  }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <span class="logo">⬡ Mermaid Editor</span>
+  <div class="sep"></div>
+
+  <select id="examples-dropdown" title="Beispiel laden">
+    <option value="">Beispiele ▾</option>
+    <option value="flowchart">Flowchart</option>
+    <option value="sequence">Sequence</option>
+    <option value="class">Class</option>
+    <option value="state">State</option>
+    <option value="er">ER-Diagramm</option>
+    <option value="gantt">Gantt</option>
+    <option value="pie">Pie Chart</option>
+    <option value="git">Git Graph</option>
+    <option value="mindmap">Mindmap</option>
+    <option value="timeline">Timeline</option>
+  </select>
+
+  <div class="sep"></div>
+
+  <button id="export-svg" title="Als SVG exportieren">↓ SVG</button>
+  <button id="export-png" title="Als PNG exportieren">↓ PNG</button>
+
+  <div class="sep"></div>
+
+  <button id="theme-btn" title="Theme wechseln">☾ Dunkel</button>
+
+  <div id="diagram-badge">
+    Typ: <span id="diagram-type">—</span>
+  </div>
+</div>
+
+<div id="main-container">
+
+  <div id="editor-pane">
+    <div id="editor-header">
+      Editor
+      <span id="editor-hint">Strg+Enter zum Rendern</span>
+    </div>
+    <div id="editor-container"></div>
+  </div>
+
+  <div id="divider"></div>
+
+  <div id="preview-pane">
+    <div id="preview-header">
+      Vorschau
+      <div id="zoom-controls" class="preview-controls">
+        <button id="zoom-out" title="Herauszoomen">−</button>
+        <span id="zoom-label">100%</span>
+        <button id="zoom-in" title="Hineinzoomen">+</button>
+        <button id="reset-view" title="Ansicht zurücksetzen">↺</button>
+      </div>
+    </div>
+    <div id="error-box"></div>
+    <div id="preview"></div>
+  </div>
+
+</div>
+
+</body>
+</html>
