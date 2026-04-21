@@ -5,29 +5,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mermaid Editor</title>
 
-<!-- Mermaid.js -->
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 
-<!-- CodeMirror 6 -->
 <script type="module">
+import { basicSetup } from 'https://esm.sh/codemirror@6';
+import { EditorView, keymap } from 'https://esm.sh/@codemirror/view@6';
 import { EditorState } from 'https://esm.sh/@codemirror/state@6';
-import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from 'https://esm.sh/@codemirror/view@6';
-import { defaultKeymap, indentWithTab } from 'https://esm.sh/@codemirror/commands@6';
-import { StreamLanguage } from 'https://esm.sh/@codemirror/language@6';
+import { defaultKeymap } from 'https://esm.sh/@codemirror/commands@6';
 import { oneDark } from 'https://esm.sh/@codemirror/theme-one-dark@6';
+import { StreamLanguage } from 'https://esm.sh/@codemirror/language@6';
 
-// Simple Mermaid language highlight mode
-const mermaidMode = StreamLanguage.define({
+const mermaidLang = StreamLanguage.define({
   name: 'mermaid',
   token(stream) {
-    if (stream.match(/^%%.*$/)) { stream.skipToEnd(); return 'comment'; }
-    if (stream.match(/^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|journey|gitGraph|mindmap|timeline|quadrantChart|xychart-beta|block-beta|packet-beta|architecture-beta|requirementDiagram|C4Context|C4Container|C4Component|C4Dynamic|C4Deployment)\b/)) return 'keyword';
-    if (stream.match(/\b(subgraph|end|participant|actor|activate|deactivate|note|loop|alt|else|opt|par|critical|break|rect|autonumber|class|state|section|title|dateFormat|axisFormat|excludes|includes|todayMarker|clickHandler|click|style|linkStyle|classDef|direction|LR|RL|TB|BT|TD)\b/)) return 'keyword';
-    if (stream.match(/-->|==>|-.->|===>|o--o|<-->|\|>|\[|\]|\{|\}|\(|\)/)) return 'operator';
+    if (stream.match(/%%.*$/)) { stream.skipToEnd(); return 'comment'; }
+    if (stream.match(/^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram-v2|stateDiagram|erDiagram|gantt|pie|journey|gitGraph|mindmap|timeline|quadrantChart|xychart-beta|requirementDiagram)\b/))
+      return 'keyword';
+    if (stream.match(/\b(subgraph|end|participant|actor|activate|deactivate|note|loop|alt|else|opt|par|rect|autonumber|class|state|section|title|dateFormat|axisFormat|LR|RL|TB|BT|TD|direction|style|classDef|linkStyle|click)\b/))
+      return 'keyword';
+    if (stream.match(/-->|==>|\.->|===>|o--o|x--x|<-->|-->/)) return 'operator';
     if (stream.match(/"[^"]*"/)) return 'string';
     if (stream.match(/'[^']*'/)) return 'string';
-    if (stream.match(/\[[^\]]*\]/)) return 'string';
-    if (stream.match(/\([^)]*\)/)) return 'string';
     if (stream.match(/\d+/)) return 'number';
     stream.next();
     return null;
@@ -101,13 +99,13 @@ const EXAMPLES = {
     title Projektplan
     dateFormat  YYYY-MM-DD
     section Phase 1
-    Konzept           :done,    des1, 2024-01-01, 7d
-    Design            :active,  des2, 2024-01-08, 5d
+    Konzept     :done,   des1, 2024-01-01, 7d
+    Design      :active, des2, 2024-01-08, 5d
     section Phase 2
-    Entwicklung       :         dev1, 2024-01-13, 10d
-    Testing           :         test1, after dev1, 5d
+    Entwicklung :        dev1, 2024-01-13, 10d
+    Testing     :        test1, after dev1, 5d
     section Phase 3
-    Deployment        :         dep1, after test1, 3d`,
+    Deployment  :        dep1, after test1, 3d`,
 
   pie: `pie title Technologie-Stack
     "TypeScript" : 40
@@ -157,22 +155,22 @@ const EXAMPLES = {
          : ESM Support`
 };
 
-let editorView;
+let editorView = null;
 let isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-let renderTimeout;
+let renderTimeout = null;
 let zoomLevel = 1;
 let panX = 0, panY = 0;
 let isPanning = false, panStartX = 0, panStartY = 0, panStartPanX = 0, panStartPanY = 0;
+let isResizing = false;
+
+// ─── Editor ──────────────────────────────────────────────────────────────────
 
 function createEditor(content, dark) {
   const extensions = [
-    lineNumbers(),
-    highlightActiveLine(),
-    drawSelection(),
-    mermaidMode,
+    basicSetup,
+    mermaidLang,
     keymap.of([
       ...defaultKeymap,
-      indentWithTab,
       { key: 'Ctrl-Enter', run: () => { renderDiagram(); return true; } }
     ]),
     EditorView.updateListener.of(update => {
@@ -188,46 +186,53 @@ function createEditor(content, dark) {
   });
 }
 
+function getCode() {
+  return editorView ? editorView.state.doc.toString() : '';
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────────
+
 function scheduleRender() {
   clearTimeout(renderTimeout);
   renderTimeout = setTimeout(renderDiagram, 300);
 }
 
 async function renderDiagram() {
-  const code = editorView.state.doc.toString();
+  const code = getCode();
   const preview = document.getElementById('preview');
   const errorBox = document.getElementById('error-box');
   const diagramType = document.getElementById('diagram-type');
 
-  localStorage.setItem('mermaid-code', code);
+  if (code.trim()) localStorage.setItem('mermaid-code', code);
 
-  const type = detectDiagramType(code);
-  diagramType.textContent = type || '—';
+  diagramType.textContent = detectDiagramType(code) || '—';
 
   try {
     errorBox.style.display = 'none';
     preview.innerHTML = '';
-
-    const id = 'mermaid-' + Date.now();
+    const id = 'mg-' + Date.now();
     const { svg } = await mermaid.render(id, code);
     preview.innerHTML = svg;
     applyTransform();
   } catch (e) {
-    const msg = e.message || String(e);
-    const clean = msg.replace(/\[.*?\]/g, '').trim();
-    errorBox.textContent = '⚠ ' + clean;
+    const msg = (e.message || String(e)).replace(/\n.*$/s, '').trim();
+    errorBox.textContent = '⚠ ' + msg;
     errorBox.style.display = 'block';
   }
 }
 
 function detectDiagramType(code) {
   const first = code.trim().split('\n')[0].trim().toLowerCase();
-  const types = ['flowchart','graph','sequencediagram','classdiagram','statediagram','erdiagram','gantt','pie','journey','gitgraph','mindmap','timeline','quadrantchart','xychart','block','packet','architecture','requirementdiagram','c4context','c4container','c4component'];
+  const types = ['flowchart','graph','sequencediagram','classdiagram','statediagram',
+    'erdiagram','gantt','pie','journey','gitgraph','mindmap','timeline',
+    'quadrantchart','xychart','requirementdiagram'];
   for (const t of types) {
     if (first.startsWith(t)) return first.split(/\s/)[0];
   }
   return null;
 }
+
+// ─── Zoom / Pan ───────────────────────────────────────────────────────────────
 
 function applyTransform() {
   const svg = document.querySelector('#preview svg');
@@ -242,110 +247,20 @@ function resetView() {
   applyTransform();
 }
 
-async function exportSVG() {
-  const svg = document.querySelector('#preview svg');
-  if (!svg) return;
-  const blob = new Blob([svg.outerHTML], { type: 'image/svg+xml' });
-  download(URL.createObjectURL(blob), 'diagram.svg');
-}
-
-async function exportPNG() {
-  const svg = document.querySelector('#preview svg');
-  if (!svg) return;
-
-  const svgData = new XMLSerializer().serializeToString(svg);
-  const canvas = document.createElement('canvas');
-  const scale = 2;
-  const w = svg.viewBox.baseVal.width || svg.clientWidth || 800;
-  const h = svg.viewBox.baseVal.height || svg.clientHeight || 600;
-  canvas.width = w * scale;
-  canvas.height = h * scale;
-  const ctx = canvas.getContext('2d');
-  ctx.scale(scale, scale);
-  ctx.fillStyle = isDark ? '#1e1e2e' : '#ffffff';
-  ctx.fillRect(0, 0, w, h);
-
-  const img = new Image();
-  const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData);
-  img.onload = () => {
-    ctx.drawImage(img, 0, 0);
-    download(canvas.toDataURL('image/png'), 'diagram.png');
-  };
-  img.src = url;
-}
-
-function download(url, filename) {
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-}
-
-function setTheme(dark) {
-  isDark = dark;
-  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-  document.getElementById('theme-btn').textContent = dark ? '☀ Hell' : '☾ Dunkel';
-  mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', securityLevel: 'loose' });
-  // Rebuild editor
-  const code = editorView.state.doc.toString();
-  editorView.destroy();
-  document.getElementById('editor-container').innerHTML = '';
-  editorView = createEditor(code, dark);
-  renderDiagram();
-}
-
-function loadExample(name) {
-  const code = EXAMPLES[name];
-  if (!code) return;
-  editorView.dispatch({
-    changes: { from: 0, to: editorView.state.doc.length, insert: code }
-  });
-  document.getElementById('examples-dropdown').value = '';
-}
-
-// Split pane drag
-let isResizing = false;
-function initSplitPane() {
-  const divider = document.getElementById('divider');
-  const container = document.getElementById('main-container');
-
-  divider.addEventListener('mousedown', e => {
-    isResizing = true;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    e.preventDefault();
-  });
-
-  document.addEventListener('mousemove', e => {
-    if (!isResizing) return;
-    const rect = container.getBoundingClientRect();
-    const ratio = ((e.clientX - rect.left) / rect.width) * 100;
-    const clamped = Math.max(20, Math.min(80, ratio));
-    document.getElementById('editor-pane').style.width = clamped + '%';
-    document.getElementById('preview-pane').style.width = (100 - clamped) + '%';
-    divider.style.left = clamped + '%';
-  });
-
-  document.addEventListener('mouseup', () => {
-    isResizing = false;
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-  });
-}
-
-// Pan & Zoom
 function initPanZoom() {
   const preview = document.getElementById('preview');
 
+  preview.style.cursor = 'grab';
+
   preview.addEventListener('wheel', e => {
     e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    zoomLevel = Math.max(0.1, Math.min(10, zoomLevel * delta));
+    const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    zoomLevel = Math.max(0.1, Math.min(10, zoomLevel * factor));
     applyTransform();
   }, { passive: false });
 
   preview.addEventListener('mousedown', e => {
-    if (e.button !== 1 && !e.altKey) return;
+    if (e.button !== 0) return;
     e.preventDefault();
     isPanning = true;
     panStartX = e.clientX;
@@ -363,26 +278,136 @@ function initPanZoom() {
   });
 
   document.addEventListener('mouseup', () => {
+    if (!isPanning) return;
     isPanning = false;
-    document.getElementById('preview').style.cursor = '';
+    document.getElementById('preview').style.cursor = 'grab';
   });
 }
 
-// Init
-document.addEventListener('DOMContentLoaded', () => {
-  mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default', securityLevel: 'loose' });
-  setTheme(isDark);
+// ─── Split pane ───────────────────────────────────────────────────────────────
 
+function initSplitPane() {
+  const divider = document.getElementById('divider');
+  const container = document.getElementById('main-container');
+  const editorPane = document.getElementById('editor-pane');
+  const previewPane = document.getElementById('preview-pane');
+
+  divider.addEventListener('mousedown', e => {
+    isResizing = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!isResizing) return;
+    const rect = container.getBoundingClientRect();
+    const pct = Math.max(20, Math.min(80,
+      ((e.clientX - rect.left) / rect.width) * 100
+    ));
+    editorPane.style.flex = `0 0 ${pct}%`;
+    previewPane.style.flex = `0 0 ${100 - pct}%`;
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!isResizing) return;
+    isResizing = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+}
+
+// ─── Export ───────────────────────────────────────────────────────────────────
+
+function exportSVG() {
+  const svg = document.querySelector('#preview svg');
+  if (!svg) return alert('Kein Diagramm zum Exportieren.');
+  const blob = new Blob([svg.outerHTML], { type: 'image/svg+xml' });
+  triggerDownload(URL.createObjectURL(blob), 'diagram.svg');
+}
+
+function exportPNG() {
+  const svg = document.querySelector('#preview svg');
+  if (!svg) return alert('Kein Diagramm zum Exportieren.');
+  const scale = 2;
+  const vb = svg.viewBox.baseVal;
+  const w = vb.width || svg.clientWidth || 800;
+  const h = vb.height || svg.clientHeight || 600;
+  const canvas = document.createElement('canvas');
+  canvas.width = w * scale;
+  canvas.height = h * scale;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.fillStyle = isDark ? '#1c1c1e' : '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+  const img = new Image();
+  img.onload = () => {
+    ctx.drawImage(img, 0, 0);
+    triggerDownload(canvas.toDataURL('image/png'), 'diagram.png');
+  };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+}
+
+function triggerDownload(url, name) {
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+}
+
+// ─── Theme ────────────────────────────────────────────────────────────────────
+
+function applyThemeDOM(dark) {
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  document.getElementById('theme-btn').textContent = dark ? '☀ Hell' : '☾ Dunkel';
+}
+
+function setTheme(dark) {
+  isDark = dark;
+  applyThemeDOM(dark);
+  mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', securityLevel: 'loose' });
+  if (!editorView) return;
+  const code = getCode();
+  editorView.destroy();
+  document.getElementById('editor-container').innerHTML = '';
+  editorView = createEditor(code, dark);
+  renderDiagram();
+}
+
+// ─── Examples ─────────────────────────────────────────────────────────────────
+
+function loadExample(name) {
+  const code = EXAMPLES[name];
+  if (!code || !editorView) return;
+  editorView.dispatch({
+    changes: { from: 0, to: editorView.state.doc.length, insert: code }
+  });
+  document.getElementById('examples-dropdown').value = '';
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+  // 1. Apply theme visuals (no editor exists yet)
+  applyThemeDOM(isDark);
+  mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default', securityLevel: 'loose' });
+
+  // 2. Create editor
   const saved = localStorage.getItem('mermaid-code') || EXAMPLES.flowchart;
   editorView = createEditor(saved, isDark);
 
+  // 3. Wire up controls
   document.getElementById('theme-btn').addEventListener('click', () => setTheme(!isDark));
   document.getElementById('export-svg').addEventListener('click', exportSVG);
   document.getElementById('export-png').addEventListener('click', exportPNG);
   document.getElementById('reset-view').addEventListener('click', resetView);
-  document.getElementById('zoom-in').addEventListener('click', () => { zoomLevel = Math.min(10, zoomLevel * 1.2); applyTransform(); });
-  document.getElementById('zoom-out').addEventListener('click', () => { zoomLevel = Math.max(0.1, zoomLevel / 1.2); applyTransform(); });
-  document.getElementById('examples-dropdown').addEventListener('change', e => loadExample(e.target.value));
+  document.getElementById('zoom-in').addEventListener('click', () => {
+    zoomLevel = Math.min(10, zoomLevel * 1.25); applyTransform();
+  });
+  document.getElementById('zoom-out').addEventListener('click', () => {
+    zoomLevel = Math.max(0.1, zoomLevel / 1.25); applyTransform();
+  });
+  document.getElementById('examples-dropdown').addEventListener('change', e => {
+    loadExample(e.target.value);
+  });
 
   initSplitPane();
   initPanZoom();
@@ -396,17 +421,16 @@ document.addEventListener('DOMContentLoaded', () => {
   :root {
     --bg: #f5f5f7;
     --surface: #ffffff;
-    --surface2: #f0f0f5;
+    --surface2: #ebebf0;
     --border: #d1d1d6;
     --text: #1c1c1e;
     --text2: #636366;
     --accent: #0071e3;
     --accent-hover: #0077ed;
     --error-bg: #fff0f0;
-    --error-text: #cc0000;
-    --toolbar-bg: #ffffff;
-    --divider: #c7c7cc;
+    --error-text: #c00;
     --shadow: 0 1px 3px rgba(0,0,0,0.12);
+    --divider-color: #c7c7cc;
   }
 
   [data-theme="dark"] {
@@ -418,11 +442,10 @@ document.addEventListener('DOMContentLoaded', () => {
     --text2: #aeaeb2;
     --accent: #0a84ff;
     --accent-hover: #409cff;
-    --error-bg: #2c1a1a;
+    --error-bg: #2c1515;
     --error-text: #ff6b6b;
-    --toolbar-bg: #2c2c2e;
-    --divider: #48484a;
     --shadow: 0 1px 3px rgba(0,0,0,0.4);
+    --divider-color: #636366;
   }
 
   html, body {
@@ -434,33 +457,34 @@ document.addEventListener('DOMContentLoaded', () => {
     overflow: hidden;
   }
 
-  /* Toolbar */
+  /* ── Toolbar ── */
   #toolbar {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 8px 12px;
-    background: var(--toolbar-bg);
+    padding: 0 12px;
+    height: 48px;
+    background: var(--surface);
     border-bottom: 1px solid var(--border);
     box-shadow: var(--shadow);
-    flex-wrap: wrap;
     z-index: 10;
-    height: 48px;
+    flex-shrink: 0;
   }
 
-  #toolbar .logo {
+  .logo {
     font-weight: 700;
     font-size: 15px;
     color: var(--accent);
-    margin-right: 8px;
     white-space: nowrap;
+    margin-right: 4px;
   }
 
-  #toolbar .sep {
+  .sep {
     width: 1px;
     height: 22px;
     background: var(--border);
-    margin: 0 4px;
+    margin: 0 2px;
+    flex-shrink: 0;
   }
 
   button, select {
@@ -472,147 +496,133 @@ document.addEventListener('DOMContentLoaded', () => {
     background: var(--surface);
     color: var(--text);
     padding: 5px 10px;
-    transition: background 0.15s, border-color 0.15s;
+    transition: background 0.12s, border-color 0.12s;
     white-space: nowrap;
+    flex-shrink: 0;
   }
-
-  button:hover, select:hover { background: var(--surface2); border-color: var(--accent); }
-
-  button.primary {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
-  }
-  button.primary:hover { background: var(--accent-hover); }
-
-  select { padding-right: 6px; }
+  button:hover { background: var(--surface2); border-color: var(--accent); }
+  select:hover { background: var(--surface2); }
 
   #diagram-badge {
+    margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 5px;
-    margin-left: auto;
-    color: var(--text2);
+    gap: 6px;
     font-size: 12px;
+    color: var(--text2);
     white-space: nowrap;
   }
-
   #diagram-type {
     font-weight: 600;
     color: var(--accent);
     background: var(--surface2);
     padding: 2px 8px;
     border-radius: 12px;
-    font-size: 12px;
   }
 
-  /* Main layout */
+  /* ── Layout ── */
   #main-container {
     display: flex;
     height: calc(100vh - 48px);
-    position: relative;
+    overflow: hidden;
   }
 
+  /* ── Editor pane ── */
   #editor-pane {
-    width: 45%;
+    flex: 0 0 45%;
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
     background: var(--surface);
-    border-right: 1px solid var(--border);
+    overflow: hidden;
   }
 
-  #editor-header {
-    padding: 6px 12px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text2);
-    background: var(--surface2);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
+  .pane-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-  }
-
-  #editor-hint { font-weight: 400; font-size: 11px; color: var(--text2); }
-
-  #editor-container {
-    flex: 1;
-    overflow: auto;
-    font-size: 13px;
-  }
-
-  /* CodeMirror overrides */
-  .cm-editor { height: 100%; }
-  .cm-editor .cm-scroller { overflow: auto; font-family: 'Menlo', 'Consolas', 'Monaco', monospace; }
-
-  /* Divider */
-  #divider {
-    position: absolute;
-    top: 0;
-    width: 6px;
-    height: 100%;
-    left: 45%;
-    transform: translateX(-50%);
-    cursor: col-resize;
-    z-index: 5;
-    background: transparent;
-    transition: background 0.15s;
-  }
-  #divider:hover, #divider.active { background: var(--accent); opacity: 0.4; }
-  #divider::after {
-    content: '';
-    position: absolute;
-    left: 2px;
-    top: 0;
-    width: 2px;
-    height: 100%;
-    background: var(--divider);
-  }
-
-  /* Preview pane */
-  #preview-pane {
-    width: 55%;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    background: var(--bg);
-  }
-
-  #preview-header {
-    padding: 6px 12px;
+    padding: 5px 12px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.06em;
     color: var(--text2);
-    background: var(--surface2);
-    border-bottom: 1px solid var(--border);
     flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
+  }
+  .pane-header span { font-weight: 400; }
+
+  #editor-container {
+    flex: 1;
+    overflow: hidden;
+    font-size: 13px;
+  }
+  .cm-editor { height: 100% !important; }
+  .cm-editor .cm-scroller {
+    overflow: auto !important;
+    font-family: 'Menlo', 'Consolas', 'Monaco', monospace;
+    font-size: 13px;
   }
 
-  #zoom-controls { margin-left: auto; display: flex; align-items: center; gap: 4px; }
-  #zoom-label { font-size: 11px; color: var(--text2); min-width: 36px; text-align: center; }
+  /* ── Divider ── */
+  #divider {
+    flex: 0 0 6px;
+    cursor: col-resize;
+    background: var(--border);
+    position: relative;
+    z-index: 2;
+    transition: background 0.15s;
+  }
+  #divider:hover { background: var(--accent); }
+  #divider::after {
+    content: '⋮';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--text2);
+    font-size: 14px;
+    line-height: 1;
+    pointer-events: none;
+  }
 
-  #preview-controls button {
-    padding: 3px 7px;
-    font-size: 12px;
-    border-radius: 4px;
+  /* ── Preview pane ── */
+  #preview-pane {
+    flex: 0 0 55%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  #zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+  #zoom-controls button {
+    padding: 2px 8px;
+    font-size: 14px;
+    border-radius: 5px;
+    line-height: 1;
+  }
+  #zoom-label {
+    font-size: 11px;
+    color: var(--text2);
+    min-width: 38px;
+    text-align: center;
+    font-weight: 400;
   }
 
   #error-box {
     display: none;
-    margin: 10px 12px;
+    margin: 8px 12px;
     padding: 10px 14px;
     background: var(--error-bg);
     color: var(--error-text);
-    border: 1px solid var(--error-text);
+    border: 1px solid currentColor;
     border-radius: 8px;
     font-family: 'Menlo', monospace;
     font-size: 12px;
@@ -625,26 +635,20 @@ document.addEventListener('DOMContentLoaded', () => {
   #preview {
     flex: 1;
     overflow: hidden;
-    display: flex;
-    align-items: flex-start;
-    justify-content: flex-start;
     padding: 20px;
-    cursor: default;
     position: relative;
   }
-
   #preview svg {
     max-width: none;
     display: block;
-    filter: drop-shadow(0 2px 8px rgba(0,0,0,0.1));
+    filter: drop-shadow(0 2px 8px rgba(0,0,0,0.10));
   }
 
-  /* Responsive */
-  @media (max-width: 700px) {
+  /* ── Responsive ── */
+  @media (max-width: 650px) {
     #main-container { flex-direction: column; }
-    #editor-pane, #preview-pane { width: 100% !important; height: 50%; }
-    #divider { display: none; }
-    #toolbar { height: auto; }
+    #editor-pane, #preview-pane { flex: 0 0 50% !important; min-height: 0; }
+    #divider { flex: 0 0 4px; cursor: row-resize; }
   }
 </style>
 </head>
@@ -654,7 +658,7 @@ document.addEventListener('DOMContentLoaded', () => {
   <span class="logo">⬡ Mermaid Editor</span>
   <div class="sep"></div>
 
-  <select id="examples-dropdown" title="Beispiel laden">
+  <select id="examples-dropdown">
     <option value="">Beispiele ▾</option>
     <option value="flowchart">Flowchart</option>
     <option value="sequence">Sequence</option>
@@ -670,12 +674,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   <div class="sep"></div>
 
-  <button id="export-svg" title="Als SVG exportieren">↓ SVG</button>
-  <button id="export-png" title="Als PNG exportieren">↓ PNG</button>
+  <button id="export-svg">↓ SVG</button>
+  <button id="export-png">↓ PNG</button>
 
   <div class="sep"></div>
 
-  <button id="theme-btn" title="Theme wechseln">☾ Dunkel</button>
+  <button id="theme-btn">☾ Dunkel</button>
 
   <div id="diagram-badge">
     Typ: <span id="diagram-type">—</span>
@@ -685,9 +689,9 @@ document.addEventListener('DOMContentLoaded', () => {
 <div id="main-container">
 
   <div id="editor-pane">
-    <div id="editor-header">
+    <div class="pane-header">
       Editor
-      <span id="editor-hint">Strg+Enter zum Rendern</span>
+      <span>Strg+Enter zum Rendern</span>
     </div>
     <div id="editor-container"></div>
   </div>
@@ -695,9 +699,9 @@ document.addEventListener('DOMContentLoaded', () => {
   <div id="divider"></div>
 
   <div id="preview-pane">
-    <div id="preview-header">
-      Vorschau
-      <div id="zoom-controls" class="preview-controls">
+    <div class="pane-header">
+      Vorschau – Ziehen zum Verschieben · Mausrad zum Zoomen
+      <div id="zoom-controls">
         <button id="zoom-out" title="Herauszoomen">−</button>
         <span id="zoom-label">100%</span>
         <button id="zoom-in" title="Hineinzoomen">+</button>
