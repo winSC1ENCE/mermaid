@@ -3,223 +3,385 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mermaid Editor</title>
+<title>Diagram Studio</title>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:        #f0f0f5;
+  --bg:        #f5f5f7;
   --surface:   #ffffff;
-  --surface2:  #e8e8f0;
-  --border:    #c8c8d0;
-  --text:      #111114;
-  --text2:     #666672;
+  --surface2:  #f0f0f2;
+  --surface3:  #e5e5ea;
+  --border:    #d1d1d6;
+  --text:      #1d1d1f;
+  --text2:     #6e6e73;
+  --text3:     #aeaeb2;
   --accent:    #0071e3;
-  --err-bg:    #fff0f0;
+  --accent-h:  #0077ed;
+  --err-bg:    #fff1f0;
   --err-fg:    #c00020;
-  --shadow:    0 1px 4px rgba(0,0,0,.12);
-  --ln-bg:     #f4f4f8;
-  --ln-fg:     #aaaabc;
+  --shadow:    0 1px 3px rgba(0,0,0,.07), 0 1px 2px rgba(0,0,0,.04);
+  --ln-bg:     #f8f8fa;
+  --ln-fg:     #b8b8c8;
   --editor-bg: #ffffff;
-  --editor-fg: #111114;
+  --editor-fg: #1d1d1f;
+  --radius:    8px;
+  --t:         .16s ease;
 }
 [data-theme=dark] {
-  --bg:        #1a1a1f;
-  --surface:   #26262e;
-  --surface2:  #32323c;
-  --border:    #44444e;
-  --text:      #e8e8f2;
-  --text2:     #9090a4;
-  --accent:    #4da3ff;
-  --err-bg:    #2c1414;
+  --bg:        #1c1c1e;
+  --surface:   #2c2c2e;
+  --surface2:  #3a3a3c;
+  --surface3:  #48484a;
+  --border:    #48484a;
+  --text:      #f5f5f7;
+  --text2:     #98989d;
+  --text3:     #636366;
+  --accent:    #0a84ff;
+  --accent-h:  #409cff;
+  --err-bg:    #2c1212;
   --err-fg:    #ff7070;
   --shadow:    0 1px 4px rgba(0,0,0,.4);
-  --ln-bg:     #22222a;
-  --ln-fg:     #55556a;
-  --editor-bg: #1e1e26;
-  --editor-fg: #d4d4e8;
+  --ln-bg:     #242426;
+  --ln-fg:     #505060;
+  --editor-bg: #252528;
+  --editor-fg: #f0f0f5;
 }
 
-html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; }
+html, body {
+  height: 100%; overflow: hidden;
+  background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+  font-size: 14px;
+}
 
-/* ── Toolbar ── */
+/* ── Toolbar ──────────────────────────────────────────────────────────────── */
 #toolbar {
-  height: 46px; display: flex; align-items: center; gap: 5px;
-  padding: 0 10px; background: var(--surface); border-bottom: 1px solid var(--border);
+  height: 48px; display: flex; align-items: center; gap: 4px;
+  padding: 0 12px; background: var(--surface); border-bottom: 1px solid var(--border);
   box-shadow: var(--shadow); flex-shrink: 0; overflow-x: auto; overflow-y: hidden;
+  position: relative; z-index: 20;
 }
-.logo { font-weight: 700; font-size: 15px; color: var(--accent); white-space: nowrap; margin-right: 4px; }
-.sep  { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; margin: 0 2px; }
+.logo { font-weight: 700; font-size: 15px; white-space: nowrap; margin-right: 2px; letter-spacing: -.3px; }
+.logo em { font-style: normal; color: var(--accent); }
+.sep { width: 1px; height: 22px; background: var(--border); flex-shrink: 0; margin: 0 4px; }
 
+/* mode tabs */
+#mode-tabs {
+  display: flex; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 2px; gap: 2px; flex-shrink: 0;
+}
+.tab {
+  padding: 3px 13px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  cursor: pointer; border: none; background: transparent; color: var(--text2);
+  transition: all var(--t); white-space: nowrap;
+}
+.tab:hover { background: var(--surface3); color: var(--text); }
+.tab.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+
+/* buttons */
 button, select {
-  font: inherit; font-size: 13px; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
   border: 1px solid var(--border); border-radius: 6px;
   background: var(--surface); color: var(--text);
-  padding: 4px 9px; white-space: nowrap; flex-shrink: 0;
-  transition: background .12s, border-color .12s;
+  padding: 4px 10px; white-space: nowrap; flex-shrink: 0;
+  transition: background var(--t), border-color var(--t);
+  line-height: 1.4;
 }
 button:hover { background: var(--surface2); border-color: var(--accent); }
-select { max-width: 140px; }
+button.icon { padding: 4px 8px; font-size: 14px; }
+select { max-width: 136px; }
 
-#diagram-badge { margin-left: auto; display: flex; align-items: center; gap: 6px;
-  font-size: 12px; color: var(--text2); white-space: nowrap; flex-shrink: 0; }
+#badge { margin-left: auto; display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--text2); white-space: nowrap; flex-shrink: 0; }
 #diagram-type { font-weight: 700; color: var(--accent);
-  background: var(--surface2); padding: 2px 8px; border-radius: 10px; }
+  background: var(--surface2); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
 
-/* ── Layout ── */
+/* ── Layout ───────────────────────────────────────────────────────────────── */
 #main {
-  display: flex; height: calc(100vh - 46px); overflow: hidden;
+  display: flex; height: calc(100vh - 48px - 26px); overflow: hidden;
 }
 
-/* ── Editor pane ── */
+/* ── Editor pane ──────────────────────────────────────────────────────────── */
 #editor-pane {
-  flex: 0 0 42%; min-width: 150px; display: flex; flex-direction: column;
-  background: var(--surface); overflow: hidden;
+  flex: 0 0 42%; min-width: 140px; display: flex; flex-direction: column;
+  background: var(--surface); border-right: 1px solid var(--border); overflow: hidden;
 }
 .pane-hd {
   display: flex; align-items: center; justify-content: space-between;
   padding: 4px 10px; background: var(--surface2); border-bottom: 1px solid var(--border);
-  font-size: 11px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: .07em; color: var(--text2); flex-shrink: 0;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--text2); flex-shrink: 0; min-height: 26px;
 }
-.pane-hd small { font-weight: 400; font-size: 11px; }
+.pane-hd small { font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 10px; }
 
-/* line-numbers + textarea wrapper */
-#editor-wrap {
-  flex: 1; display: flex; overflow: hidden; position: relative;
-  background: var(--editor-bg);
-}
+#editor-wrap { flex: 1; display: flex; overflow: hidden; background: var(--editor-bg); }
 #line-nums {
-  width: 38px; flex-shrink: 0; padding: 10px 0;
-  background: var(--ln-bg); border-right: 1px solid var(--border);
-  overflow: hidden; user-select: none; text-align: right;
-  font: 13px/1.55 'Menlo','Consolas','Monaco',monospace;
+  width: 42px; flex-shrink: 0; padding: 10px 0; background: var(--ln-bg);
+  border-right: 1px solid var(--border); overflow: hidden; user-select: none;
+  text-align: right; font: 12.5px/1.6 'Menlo','Consolas','Monaco',monospace;
   color: var(--ln-fg); pointer-events: none;
 }
-#line-nums span { display: block; padding-right: 7px; }
-
+#line-nums span { display: block; padding-right: 8px; }
 #code {
-  flex: 1; resize: none; border: none; outline: none;
-  padding: 10px 10px 10px 10px;
-  font: 13px/1.55 'Menlo','Consolas','Monaco',monospace;
+  flex: 1; resize: none; border: none; outline: none; padding: 10px 12px;
+  font: 12.5px/1.6 'Menlo','Consolas','Monaco',monospace;
   background: var(--editor-bg); color: var(--editor-fg);
   tab-size: 2; white-space: pre; overflow: auto;
 }
 
-/* ── Divider ── */
+/* ── Divider ──────────────────────────────────────────────────────────────── */
 #divider {
   flex: 0 0 5px; cursor: col-resize; background: var(--border);
   display: flex; align-items: center; justify-content: center;
-  transition: background .15s; flex-shrink: 0; z-index: 2;
+  transition: background var(--t); flex-shrink: 0; z-index: 2;
 }
-#divider:hover { background: var(--accent); }
-#divider::after { content: '⋮'; font-size: 13px; color: var(--text2); pointer-events: none; }
+#divider:hover, #divider.drag { background: var(--accent); }
+#divider::after { content: '⋮'; font-size: 12px; color: var(--text3); pointer-events: none; }
 
-/* ── Preview pane ── */
-#preview-pane {
-  flex: 1; min-width: 150px; display: flex; flex-direction: column;
-  background: var(--bg); overflow: hidden;
+/* ── Right pane ───────────────────────────────────────────────────────────── */
+#right-pane {
+  flex: 1; min-width: 140px; display: flex; flex-direction: column; overflow: hidden;
 }
-#zoom-bar { display: flex; align-items: center; gap: 3px; }
-#zoom-bar button { padding: 2px 8px; font-size: 14px; }
-#zoom-lbl { font-size: 11px; color: var(--text2); min-width: 38px; text-align: center; font-weight: 400; }
+#right-hd {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 10px; background: var(--surface2); border-bottom: 1px solid var(--border);
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--text2); flex-shrink: 0; min-height: 26px;
+}
+#zoom-bar { display: flex; align-items: center; gap: 2px; }
+#zoom-bar button { padding: 2px 7px; font-size: 14px; }
+#zoom-lbl { font-size: 11px; color: var(--text2); min-width: 38px; text-align: center; font-weight: 400; text-transform: none; letter-spacing: 0; }
 
 #error-box {
-  display: none; margin: 8px 10px; padding: 9px 12px; flex-shrink: 0;
+  display: none; margin: 8px 10px 0; padding: 9px 12px; flex-shrink: 0;
   background: var(--err-bg); color: var(--err-fg);
   border: 1px solid currentColor; border-radius: 7px;
-  font: 12px/1.5 'Menlo','Consolas',monospace;
-  white-space: pre-wrap; word-break: break-word;
+  font: 11.5px/1.5 'Menlo','Consolas',monospace; white-space: pre-wrap; word-break: break-word;
 }
 
-#preview {
-  flex: 1; overflow: hidden; padding: 20px;
-  cursor: grab; position: relative;
+/* mermaid canvas */
+#mermaid-view {
+  flex: 1; overflow: hidden; padding: 24px; cursor: grab; position: relative; background: var(--bg);
 }
-#preview.panning { cursor: grabbing; }
-#preview svg { max-width: none; display: block;
-  filter: drop-shadow(0 2px 10px rgba(0,0,0,.12)); }
-#preview-empty {
-  position: absolute; inset: 0; display: flex; align-items: center;
-  justify-content: center; color: var(--text2); font-size: 13px;
-  pointer-events: none;
+#mermaid-view.panning { cursor: grabbing; }
+#mermaid-view svg { max-width: none; display: block; filter: drop-shadow(0 2px 10px rgba(0,0,0,.10)); }
+#view-empty {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 10px;
+  color: var(--text3); font-size: 13px; pointer-events: none;
+}
+#view-empty .ei { font-size: 30px; opacity: .35; }
+
+/* markdown preview */
+#md-view { flex: 1; overflow-y: auto; background: var(--bg); display: none; }
+.md-body {
+  max-width: 780px; margin: 0 auto; padding: 32px 40px 64px;
+  font-size: 15px; line-height: 1.78; color: var(--text);
+}
+.md-body h1,.md-body h2,.md-body h3,.md-body h4,.md-body h5,.md-body h6 {
+  font-weight: 700; line-height: 1.3; margin: 1.6em 0 0.55em; color: var(--text);
+}
+.md-body h1:first-child,.md-body h2:first-child { margin-top: 0; }
+.md-body h1 { font-size: 2em;   border-bottom: 2px solid var(--border); padding-bottom: .3em; }
+.md-body h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: .25em; }
+.md-body h3 { font-size: 1.2em; }
+.md-body h4 { font-size: 1em; }
+.md-body p  { margin: .9em 0; }
+.md-body p:first-child { margin-top: 0; }
+.md-body a  { color: var(--accent); text-decoration: none; }
+.md-body a:hover { text-decoration: underline; }
+.md-body strong { font-weight: 700; }
+.md-body em { font-style: italic; }
+.md-body code {
+  font-family: 'Menlo','Consolas','Monaco',monospace; font-size: .86em;
+  background: var(--surface2); color: var(--text);
+  padding: .15em .45em; border-radius: 4px; border: 1px solid var(--border);
+}
+.md-body pre {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 15px 18px; overflow-x: auto; margin: 1.2em 0;
+}
+.md-body pre code { background: none; border: none; padding: 0; font-size: .875em; color: var(--editor-fg); }
+.md-body blockquote {
+  border-left: 4px solid var(--accent); margin: 1.2em 0; padding: .6em 1.2em;
+  color: var(--text2); background: var(--surface2); border-radius: 0 var(--radius) var(--radius) 0;
+}
+.md-body blockquote p { margin: 0; }
+.md-body table { border-collapse: collapse; width: 100%; margin: 1.2em 0; font-size: .93em; }
+.md-body th,.md-body td { border: 1px solid var(--border); padding: 8px 14px; text-align: left; }
+.md-body th { background: var(--surface2); font-weight: 600; }
+.md-body tr:nth-child(even) td { background: var(--surface2); }
+.md-body tr:hover td { background: var(--surface3); transition: background .1s; }
+.md-body ul,.md-body ol { margin: .8em 0; padding-left: 1.8em; }
+.md-body li { margin: .35em 0; }
+.md-body li > ul,.md-body li > ol { margin: .2em 0; }
+.md-body hr { border: none; border-top: 2px solid var(--border); margin: 2em 0; }
+.md-body img { max-width: 100%; border-radius: var(--radius); }
+.mermaid-wrap {
+  display: flex; justify-content: center; margin: 1.5em 0; padding: 16px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto;
+}
+.mermaid-wrap svg { max-width: 100%; filter: drop-shadow(0 2px 8px rgba(0,0,0,.08)); }
+.mermaid-err {
+  color: var(--err-fg); background: var(--err-bg);
+  padding: 10px 14px; border-radius: 6px; font-size: 12px; width: 100%;
 }
 
+/* ── Status bar ───────────────────────────────────────────────────────────── */
+#statusbar {
+  height: 26px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 12px; background: var(--accent); color: rgba(255,255,255,.92);
+  font-size: 11px; flex-shrink: 0; user-select: none; gap: 8px; z-index: 10;
+}
+.sb-l,.sb-r { display: flex; align-items: center; gap: 12px; }
+.sb-r span { opacity: .8; }
+#st-mode {
+  background: rgba(255,255,255,.22); padding: 1px 9px;
+  border-radius: 10px; font-weight: 700; font-size: 10px;
+}
+
+/* ── Toast ────────────────────────────────────────────────────────────────── */
+#toast {
+  position: fixed; bottom: 42px; left: 50%;
+  transform: translateX(-50%) translateY(12px);
+  background: var(--text); color: var(--surface);
+  padding: 7px 18px; border-radius: 20px;
+  font-size: 12px; font-weight: 600; opacity: 0;
+  transition: opacity .22s, transform .22s; pointer-events: none; z-index: 100;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ── Focus mode ───────────────────────────────────────────────────────────── */
+body.focus #toolbar,
+body.focus #editor-pane,
+body.focus #divider,
+body.focus #statusbar { display: none !important; }
+body.focus #main { height: 100vh; }
+body.focus .pane-hd,
+body.focus #right-hd { display: none; }
+body.focus #right-pane { flex: 1; }
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   #main { flex-direction: column; }
-  #editor-pane, #preview-pane { flex: 0 0 50% !important; min-height: 0; }
-  #divider { flex: 0 0 4px; cursor: row-resize; }
+  #editor-pane { flex: 0 0 45% !important; min-height: 0; border-right: none; border-bottom: 1px solid var(--border); }
+  #right-pane { flex: 1 !important; }
+  #divider { flex: 0 0 4px !important; cursor: row-resize; }
+  .md-body { padding: 20px 18px 48px; }
 }
 </style>
 </head>
 <body>
 
 <div id="toolbar">
-  <span class="logo">⬡ Mermaid Editor</span>
+  <span class="logo">◈ <em>Diagram</em> Studio</span>
   <div class="sep"></div>
 
-  <select id="sel-example">
-    <option value="">Beispiele ▾</option>
-    <option value="flowchart">Flowchart</option>
-    <option value="sequence">Sequence</option>
-    <option value="class">Class</option>
-    <option value="state">State</option>
-    <option value="er">ER-Diagramm</option>
-    <option value="gantt">Gantt</option>
-    <option value="pie">Pie Chart</option>
-    <option value="git">Git Graph</option>
-    <option value="mindmap">Mindmap</option>
-    <option value="timeline">Timeline</option>
-  </select>
+  <div id="mode-tabs">
+    <button class="tab on" data-mode="mermaid">Mermaid</button>
+    <button class="tab" data-mode="markdown">Markdown</button>
+  </div>
 
   <div class="sep"></div>
-  <button id="btn-svg">↓ SVG</button>
-  <button id="btn-png">↓ PNG</button>
-  <div class="sep"></div>
-  <button id="btn-theme">☾ Dunkel</button>
 
-  <div id="diagram-badge">Typ: <span id="diagram-type">—</span></div>
+  <div id="g-mermaid" style="display:flex;align-items:center;gap:3px;flex-shrink:0;">
+    <select id="sel-example">
+      <option value="">Beispiele ▾</option>
+      <option value="flowchart">Flowchart</option>
+      <option value="sequence">Sequence</option>
+      <option value="class">Class Diagram</option>
+      <option value="state">State Machine</option>
+      <option value="er">ER-Diagramm</option>
+      <option value="gantt">Gantt</option>
+      <option value="pie">Pie Chart</option>
+      <option value="git">Git Graph</option>
+      <option value="mindmap">Mindmap</option>
+      <option value="timeline">Timeline</option>
+    </select>
+    <button id="btn-svg"      title="SVG herunterladen">↓ SVG</button>
+    <button id="btn-png"      title="PNG herunterladen">↓ PNG</button>
+    <button id="btn-copy-svg" class="icon" title="SVG-Code kopieren">⎘</button>
+  </div>
+
+  <div id="g-markdown" style="display:none;align-items:center;gap:3px;flex-shrink:0;">
+    <button id="btn-md-dl"    title="Markdown-Datei herunterladen">↓ .md</button>
+    <button id="btn-html-dl"  title="Als HTML exportieren">↓ HTML</button>
+    <button id="btn-copy-html" class="icon" title="HTML kopieren">⎘</button>
+  </div>
+
+  <div class="sep"></div>
+  <button id="btn-share"  class="icon" title="Link teilen (in Zwischenablage)">⇪</button>
+  <button id="btn-focus"  class="icon" title="Fokus-Modus  (ESC zum Beenden)">⛶</button>
+  <button id="btn-theme"  class="icon" title="Farbschema">☾</button>
+
+  <div id="badge">Typ:&nbsp;<span id="diagram-type">—</span></div>
 </div>
 
 <div id="main">
   <div id="editor-pane">
-    <div class="pane-hd">Editor <small>Strg+Enter = Rendern&nbsp;&nbsp;Tab = Einrücken</small></div>
+    <div class="pane-hd">
+      Editor
+      <small>Strg+Enter&nbsp;=&nbsp;Rendern &nbsp;·&nbsp; Tab&nbsp;=&nbsp;Einrücken</small>
+    </div>
     <div id="editor-wrap">
       <div id="line-nums"></div>
-      <textarea id="code" spellcheck="false" autocorrect="off" autocomplete="off"></textarea>
+      <textarea id="code" spellcheck="false" autocorrect="off" autocomplete="off" autocapitalize="off"></textarea>
     </div>
   </div>
 
   <div id="divider"></div>
 
-  <div id="preview-pane">
-    <div class="pane-hd">
-      Vorschau
+  <div id="right-pane">
+    <div id="right-hd">
+      <span id="right-title">Vorschau</span>
       <div id="zoom-bar">
-        <button id="btn-zout">−</button>
-        <span id="zoom-lbl">100%</span>
-        <button id="btn-zin">+</button>
-        <button id="btn-zreset">↺</button>
+        <button id="btn-zout"   class="icon" title="Verkleinern">−</button>
+        <span   id="zoom-lbl">100%</span>
+        <button id="btn-zin"    class="icon" title="Vergrößern">+</button>
+        <button id="btn-zreset" class="icon" title="Ansicht zurücksetzen">↺</button>
       </div>
     </div>
+
     <div id="error-box"></div>
-    <div id="preview">
-      <div id="preview-empty">← Code eingeben, Vorschau erscheint automatisch</div>
+
+    <div id="mermaid-view">
+      <div id="view-empty">
+        <span class="ei">◈</span>
+        Code eingeben – Vorschau erscheint automatisch
+      </div>
+    </div>
+
+    <div id="md-view">
+      <div class="md-body" id="md-body"></div>
     </div>
   </div>
 </div>
+
+<div id="statusbar">
+  <div class="sb-l">
+    <span id="st-cur">Ln 1, Sp 1</span>
+    <span id="st-cnt">1 Zeile · 0 Zeichen</span>
+  </div>
+  <div class="sb-r">
+    <span id="st-info"></span>
+    <span id="st-mode">MERMAID</span>
+  </div>
+</div>
+
+<div id="toast"></div>
 
 <script>
 (function () {
 'use strict';
 
 // ── Examples ──────────────────────────────────────────────────────────────────
-const EXAMPLES = {
+const MM = {
   flowchart: `flowchart LR
     A[Start] --> B{Entscheidung?}
-    B -->|Ja| C[Aktion A]
+    B -->|Ja|   C[Aktion A]
     B -->|Nein| D[Aktion B]
     C --> E[Ende]
     D --> E`,
@@ -262,41 +424,29 @@ const EXAMPLES = {
 
   er: `erDiagram
     CUSTOMER ||--o{ ORDER : places
-    CUSTOMER {
-        int id PK
-        string name
-        string email
-    }
+    CUSTOMER { int id PK; string name; string email }
     ORDER ||--|{ LINE_ITEM : contains
-    ORDER {
-        int id PK
-        date created_at
-        string status
-    }
-    LINE_ITEM {
-        int id PK
-        int quantity
-        float price
-    }`,
+    ORDER { int id PK; date created_at; string status }
+    LINE_ITEM { int id PK; int quantity; float price }`,
 
   gantt: `gantt
     title Projektplan
     dateFormat  YYYY-MM-DD
     section Phase 1
-    Konzept     :done,   des1, 2024-01-01, 7d
-    Design      :active, des2, 2024-01-08, 5d
+    Konzept     :done,   2024-01-01, 7d
+    Design      :active, 2024-01-08, 5d
     section Phase 2
-    Entwicklung :        dev1, 2024-01-13, 10d
-    Testing     :        test1, after dev1, 5d
+    Entwicklung :        2024-01-13, 10d
+    Testing     :        after Entwicklung, 5d
     section Phase 3
-    Deployment  :        dep1, after test1, 3d`,
+    Deployment  :        after Testing, 3d`,
 
   pie: `pie title Technologie-Stack
     "TypeScript" : 40
-    "Python" : 25
-    "Go" : 20
-    "Rust" : 10
-    "Sonstige" : 5`,
+    "Python"     : 25
+    "Go"         : 20
+    "Rust"       : 10
+    "Sonstige"   : 5`,
 
   git: `gitGraph
     commit id: "Initial"
@@ -331,161 +481,278 @@ const EXAMPLES = {
     2019 : Mermaid 8.0
     2020 : ER-Diagramme
     2021 : GitGraph
-    2022 : Mindmap
-         : Timeline
+    2022 : Mindmap : Timeline
     2023 : Mermaid 10.0`
 };
 
-// ── State ─────────────────────────────────────────────────────────────────────
-let isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-let renderTimer = null;
-let zoom = 1, px = 0, py = 0;
-let panning = false, mx0 = 0, my0 = 0, px0 = 0, py0 = 0;
-let resizing = false;
+const MD_EXAMPLE = `# Projekt-Dokumentation
+
+## Übersicht
+
+Ein Beispiel-Dokument mit **Markdown**-Formatierung und eingebetteten Mermaid-Diagrammen.
+
+## Systemarchitektur
+
+\`\`\`mermaid
+flowchart LR
+    Client --> API[REST API]
+    API --> DB[(PostgreSQL)]
+    API --> Cache[(Redis)]
+    API --> Queue[Message Queue]
+\`\`\`
+
+## Roadmap
+
+\`\`\`mermaid
+gantt
+    title Projektplan Q2
+    dateFormat  YYYY-MM-DD
+    section MVP
+    Design      :done,   2024-04-01, 14d
+    Entwicklung :active, 2024-04-15, 21d
+    section Release
+    Testing     :        2024-05-06, 10d
+    Launch      :        2024-05-16, 5d
+\`\`\`
+
+## Feature-Status
+
+| Feature      | Status | Priorität |
+|--------------|--------|-----------|
+| Auth         | ✅ Done  | Hoch      |
+| Dashboard    | 🔄 WIP   | Hoch      |
+| Reporting    | ⏳ Todo  | Mittel    |
+| Export       | ⏳ Todo  | Niedrig   |
+
+## Hinweise
+
+> **Wichtig:** Alle Termine verstehen sich als Richtwerte und können sich verschieben.
+
+Weitere Informationen finden Sie in der [Dokumentation](https://example.com).
+
+### Code-Beispiel
+
+\`\`\`python
+def process(items: list[str]) -> dict:
+    return {k: len(k) for k in items}
+\`\`\`
+`;
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
-const codeEl    = document.getElementById('code');
-const lineNums  = document.getElementById('line-nums');
-const preview   = document.getElementById('preview');
-const errorBox  = document.getElementById('error-box');
-const emptyMsg  = document.getElementById('preview-empty');
-const typeEl    = document.getElementById('diagram-type');
-const zoomLbl   = document.getElementById('zoom-lbl');
-const editorPane  = document.getElementById('editor-pane');
-const previewPane = document.getElementById('preview-pane');
+const $ = id => document.getElementById(id);
+const codeEl      = $('code');
+const lineNums    = $('line-nums');
+const mermaidView = $('mermaid-view');
+const mdView      = $('md-view');
+const mdBody      = $('md-body');
+const errorBox    = $('error-box');
+const emptyMsg    = $('view-empty');
+const typeEl      = $('diagram-type');
+const zoomLbl     = $('zoom-lbl');
+const editorPane  = $('editor-pane');
+const rightPane   = $('right-pane');
+const dividerEl   = $('divider');
+const zoomBar     = $('zoom-bar');
+const gMermaid    = $('g-mermaid');
+const gMarkdown   = $('g-markdown');
+const badge       = $('badge');
+const stCur       = $('st-cur');
+const stCnt       = $('st-cnt');
+const stInfo      = $('st-info');
+const stMode      = $('st-mode');
+const toastEl     = $('toast');
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let mode       = 'mermaid';
+let isDark     = window.matchMedia('(prefers-color-scheme: dark)').matches;
+let timer      = null;
+let zoom = 1, px = 0, py = 0;
+let panning = false, mx0 = 0, my0 = 0, px0 = 0, py0 = 0;
+let resizing   = false;
+let mmId       = 0;
+let mdId       = 0;
+
+// ── Mode ──────────────────────────────────────────────────────────────────────
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.mode === m));
+
+  const isMM = m === 'mermaid';
+  gMermaid.style.display  = isMM ? 'flex' : 'none';
+  gMarkdown.style.display = isMM ? 'none' : 'flex';
+  mermaidView.style.display = isMM ? '' : 'none';
+  mdView.style.display      = isMM ? 'none' : '';
+  zoomBar.style.display     = isMM ? '' : 'none';
+  badge.style.display       = isMM ? '' : 'none';
+  stMode.textContent = isMM ? 'MERMAID' : 'MARKDOWN';
+  localStorage.setItem('ds-mode', m);
+  scheduleRender();
+}
 
 // ── Mermaid init ──────────────────────────────────────────────────────────────
 function initMermaid(dark) {
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: dark ? 'dark' : 'default',
-    securityLevel: 'loose',
-  });
+  mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', securityLevel: 'loose' });
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
 function scheduleRender() {
-  clearTimeout(renderTimer);
-  renderTimer = setTimeout(render, 300);
+  clearTimeout(timer);
+  timer = setTimeout(render, 280);
 }
 
-let renderId = 0;
 async function render() {
-  const code = codeEl.value.trim();
-  if (!code) {
-    preview.innerHTML = '';
-    preview.appendChild(emptyMsg);
+  if (mode === 'mermaid') await renderMM();
+  else await renderMD();
+}
+
+async function renderMM() {
+  const src = codeEl.value.trim();
+  if (!src) {
+    mermaidView.innerHTML = '';
+    mermaidView.appendChild(emptyMsg);
     errorBox.style.display = 'none';
     typeEl.textContent = '—';
+    stInfo.textContent = '';
     return;
   }
-  localStorage.setItem('mermaid-code', codeEl.value);
-  typeEl.textContent = detectType(code) || '—';
+  localStorage.setItem('ds-mm', codeEl.value);
+  const type = src.split(/[\s{(]/)[0].toLowerCase();
+  typeEl.textContent = type || '—';
+  stInfo.textContent = type || '';
 
-  const id = 'mg' + (++renderId);
+  const id = 'mg' + (++mmId);
   try {
-    const { svg } = await mermaid.render(id, code);
+    const { svg } = await mermaid.render(id, src);
     errorBox.style.display = 'none';
-    preview.innerHTML = svg;
+    mermaidView.innerHTML = svg;
     applyTransform();
   } catch (e) {
     const msg = String(e.message || e).split('\n')[0].replace(/^\s*Error:\s*/i, '');
     errorBox.textContent = '⚠ ' + msg;
     errorBox.style.display = 'block';
-    // clean up orphaned element mermaid may have appended to body
-    const leftover = document.getElementById(id);
-    if (leftover) leftover.remove();
+    const stale = document.getElementById(id);
+    if (stale) stale.remove();
   }
 }
 
-function detectType(code) {
-  const w = code.split(/\s/)[0].toLowerCase();
-  return w || null;
+async function renderMD() {
+  const src = codeEl.value;
+  if (!src.trim()) {
+    mdBody.innerHTML = '<p style="color:var(--text3);text-align:center;padding:48px 0">← Markdown eingeben</p>';
+    return;
+  }
+  localStorage.setItem('ds-md', codeEl.value);
+
+  mdBody.innerHTML = marked.parse(src, { gfm: true, breaks: false });
+
+  // render embedded mermaid fences
+  const blocks = mdBody.querySelectorAll('pre > code.language-mermaid');
+  for (const block of blocks) {
+    const code = block.textContent.trim();
+    const pre  = block.parentElement;
+    const wrap = document.createElement('div');
+    wrap.className = 'mermaid-wrap';
+    pre.replaceWith(wrap);
+    try {
+      const id = 'mm' + (++mdId) + '_' + Date.now();
+      const { svg } = await mermaid.render(id, code);
+      wrap.innerHTML = svg;
+    } catch (e) {
+      wrap.innerHTML = `<div class="mermaid-err">⚠ ${esc(String(e.message || e).split('\n')[0])}</div>`;
+    }
+  }
+
+  const words = src.trim().split(/\s+/).filter(Boolean).length;
+  stInfo.textContent = `${words} Wörter`;
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // ── Zoom / Pan ────────────────────────────────────────────────────────────────
 function applyTransform() {
-  const svg = preview.querySelector('svg');
+  const svg = mermaidView.querySelector('svg');
   if (!svg) return;
   svg.style.transformOrigin = '0 0';
   svg.style.transform = `translate(${px}px,${py}px) scale(${zoom})`;
   zoomLbl.textContent = Math.round(zoom * 100) + '%';
 }
-
 function resetView() { zoom = 1; px = 0; py = 0; applyTransform(); }
 
-preview.addEventListener('wheel', e => {
+mermaidView.addEventListener('wheel', e => {
+  if (mode !== 'mermaid') return;
   e.preventDefault();
   zoom = Math.max(0.1, Math.min(10, zoom * (e.deltaY < 0 ? 1.12 : 0.89)));
   applyTransform();
 }, { passive: false });
 
-preview.addEventListener('mousedown', e => {
-  if (e.button !== 0) return;
+mermaidView.addEventListener('mousedown', e => {
+  if (e.button !== 0 || mode !== 'mermaid') return;
   e.preventDefault();
   panning = true; mx0 = e.clientX; my0 = e.clientY; px0 = px; py0 = py;
-  preview.classList.add('panning');
-});
-document.addEventListener('mousemove', e => {
-  if (!panning) return;
-  px = px0 + (e.clientX - mx0);
-  py = py0 + (e.clientY - my0);
-  applyTransform();
-});
-document.addEventListener('mouseup', () => {
-  if (!panning) return;
-  panning = false;
-  preview.classList.remove('panning');
+  mermaidView.classList.add('panning');
 });
 
-// ── Split pane drag ───────────────────────────────────────────────────────────
-const divider = document.getElementById('divider');
-const mainEl  = document.getElementById('main');
-
-divider.addEventListener('mousedown', e => {
-  resizing = true;
+// ── Split pane ────────────────────────────────────────────────────────────────
+dividerEl.addEventListener('mousedown', e => {
+  resizing = true; dividerEl.classList.add('drag');
   document.body.style.cursor = 'col-resize';
   document.body.style.userSelect = 'none';
   e.preventDefault();
 });
+
 document.addEventListener('mousemove', e => {
-  if (!resizing) return;
-  const r = mainEl.getBoundingClientRect();
-  const pct = Math.max(15, Math.min(85, (e.clientX - r.left) / r.width * 100));
-  editorPane.style.flex  = `0 0 ${pct}%`;
-  previewPane.style.flex = `0 0 ${100 - pct}%`;
+  if (panning) {
+    px = px0 + (e.clientX - mx0);
+    py = py0 + (e.clientY - my0);
+    applyTransform();
+  }
+  if (resizing) {
+    const r = $('main').getBoundingClientRect();
+    const pct = Math.max(15, Math.min(85, (e.clientX - r.left) / r.width * 100));
+    editorPane.style.flex = `0 0 ${pct}%`;
+    rightPane.style.flex  = `0 0 ${100 - pct}%`;
+  }
 });
 document.addEventListener('mouseup', () => {
-  if (!resizing) return;
-  resizing = false;
-  document.body.style.cursor = '';
-  document.body.style.userSelect = '';
+  if (panning) { panning = false; mermaidView.classList.remove('panning'); }
+  if (resizing) {
+    resizing = false; dividerEl.classList.remove('drag');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }
 });
 
 // ── Line numbers ──────────────────────────────────────────────────────────────
 function updateLineNums() {
-  const count = codeEl.value.split('\n').length;
-  const current = lineNums.children.length;
-  if (count === current) return;
-  if (count > current) {
-    const frag = document.createDocumentFragment();
-    for (let i = current + 1; i <= count; i++) {
+  const n = codeEl.value.split('\n').length;
+  const cur = lineNums.children.length;
+  if (n === cur) return;
+  if (n > cur) {
+    const f = document.createDocumentFragment();
+    for (let i = cur + 1; i <= n; i++) {
       const s = document.createElement('span');
       s.textContent = i;
-      frag.appendChild(s);
+      f.appendChild(s);
     }
-    lineNums.appendChild(frag);
+    lineNums.appendChild(f);
   } else {
-    while (lineNums.children.length > count) lineNums.lastChild.remove();
+    while (lineNums.children.length > n) lineNums.lastChild.remove();
   }
 }
+codeEl.addEventListener('scroll', () => { lineNums.scrollTop = codeEl.scrollTop; });
 
-// Sync scroll between line-nums and textarea
-codeEl.addEventListener('scroll', () => {
-  lineNums.scrollTop = codeEl.scrollTop;
-});
+// ── Status bar ────────────────────────────────────────────────────────────────
+function updateStatus() {
+  const val = codeEl.value;
+  const before = val.slice(0, codeEl.selectionStart).split('\n');
+  stCur.textContent = `Ln ${before.length}, Sp ${before[before.length - 1].length + 1}`;
+  const lines = val.split('\n').length;
+  stCnt.textContent = `${lines} ${lines === 1 ? 'Zeile' : 'Zeilen'} · ${val.length} Zeichen`;
+}
 
-// ── Tab key support ───────────────────────────────────────────────────────────
+// ── Keyboard ──────────────────────────────────────────────────────────────────
 codeEl.addEventListener('keydown', e => {
   if (e.key === 'Tab') {
     e.preventDefault();
@@ -497,49 +764,111 @@ codeEl.addEventListener('keydown', e => {
   }
   if (e.key === 'Enter' && e.ctrlKey) {
     e.preventDefault();
-    clearTimeout(renderTimer);
+    clearTimeout(timer);
     render();
   }
 });
-
-codeEl.addEventListener('input', () => {
-  updateLineNums();
-  scheduleRender();
+codeEl.addEventListener('input', () => { updateLineNums(); updateStatus(); scheduleRender(); });
+codeEl.addEventListener('keyup', updateStatus);
+codeEl.addEventListener('click', updateStatus);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.body.classList.remove('focus');
 });
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 function applyTheme(dark) {
   isDark = dark;
   document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-  document.getElementById('btn-theme').textContent = dark ? '☀ Hell' : '☾ Dunkel';
+  $('btn-theme').textContent = dark ? '☀' : '☾';
+  localStorage.setItem('ds-theme', dark ? 'dark' : 'light');
   initMermaid(dark);
   render();
 }
 
-// ── Export ────────────────────────────────────────────────────────────────────
-function exportSVG() {
-  const svg = preview.querySelector('svg');
-  if (!svg) return alert('Kein Diagramm vorhanden.');
-  const blob = new Blob([svg.outerHTML], { type: 'image/svg+xml' });
-  dl(URL.createObjectURL(blob), 'diagram.svg');
+// ── URL sharing ───────────────────────────────────────────────────────────────
+function toHash(m, code) {
+  try { return btoa(unescape(encodeURIComponent(JSON.stringify({ m, code })))); }
+  catch { return null; }
+}
+function fromHash(h) {
+  try { return JSON.parse(decodeURIComponent(escape(atob(h)))); }
+  catch { return null; }
 }
 
+// ── Toast ─────────────────────────────────────────────────────────────────────
+let toastTmr;
+function toast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTmr);
+  toastTmr = setTimeout(() => toastEl.classList.remove('show'), 2400);
+}
+
+// ── Export: Mermaid ───────────────────────────────────────────────────────────
+function exportSVG() {
+  const svg = mermaidView.querySelector('svg');
+  if (!svg) return toast('Kein Diagramm vorhanden.');
+  dl(URL.createObjectURL(new Blob([svg.outerHTML], { type: 'image/svg+xml' })), 'diagram.svg');
+}
 function exportPNG() {
-  const svg = preview.querySelector('svg');
-  if (!svg) return alert('Kein Diagramm vorhanden.');
-  const scale = 2;
-  const vb = svg.viewBox.baseVal;
+  const svg = mermaidView.querySelector('svg');
+  if (!svg) return toast('Kein Diagramm vorhanden.');
+  const sc = 2, vb = svg.viewBox.baseVal;
   const w = vb.width  || svg.getBoundingClientRect().width  || 800;
   const h = vb.height || svg.getBoundingClientRect().height || 600;
-  const canvas = document.createElement('canvas');
-  canvas.width = w * scale; canvas.height = h * scale;
-  const ctx = canvas.getContext('2d');
-  ctx.scale(scale, scale);
-  ctx.fillStyle = isDark ? '#1a1a1f' : '#ffffff';
+  const c = document.createElement('canvas');
+  c.width = w * sc; c.height = h * sc;
+  const ctx = c.getContext('2d');
+  ctx.scale(sc, sc);
+  ctx.fillStyle = isDark ? '#1c1c1e' : '#ffffff';
   ctx.fillRect(0, 0, w, h);
   const img = new Image();
-  img.onload = () => { ctx.drawImage(img, 0, 0); dl(canvas.toDataURL('image/png'), 'diagram.png'); };
+  img.onload = () => { ctx.drawImage(img, 0, 0); dl(c.toDataURL('image/png'), 'diagram.png'); };
   img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+}
+function copySVG() {
+  const svg = mermaidView.querySelector('svg');
+  if (!svg) return toast('Kein Diagramm vorhanden.');
+  navigator.clipboard.writeText(svg.outerHTML).then(() => toast('SVG-Code kopiert ✓'));
+}
+
+// ── Export: Markdown ──────────────────────────────────────────────────────────
+function exportMD() {
+  dl(URL.createObjectURL(new Blob([codeEl.value], { type: 'text/markdown;charset=utf-8' })), 'dokument.md');
+}
+function exportHTML() {
+  const title = (codeEl.value.match(/^#+ (.+)/m)?.[1] || 'Dokument').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+  const html = `<!DOCTYPE html>
+<html lang="de"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${title}</title>
+<style>
+body{margin:0;padding:40px 20px;background:#fff;color:#1d1d1f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+.md-body{max-width:780px;margin:0 auto;font-size:15px;line-height:1.78}
+.md-body h1,.md-body h2,.md-body h3,.md-body h4{font-weight:700;line-height:1.3;margin:1.6em 0 .55em}
+.md-body h1{font-size:2em;border-bottom:2px solid #d1d1d6;padding-bottom:.3em}
+.md-body h2{font-size:1.5em;border-bottom:1px solid #d1d1d6;padding-bottom:.25em}
+.md-body h3{font-size:1.2em}.md-body p{margin:.9em 0}
+.md-body a{color:#0071e3;text-decoration:none}
+.md-body code{font-family:Menlo,Consolas,monospace;font-size:.86em;background:#f0f0f2;padding:.15em .45em;border-radius:4px;border:1px solid #d1d1d6}
+.md-body pre{background:#f0f0f2;border:1px solid #d1d1d6;border-radius:8px;padding:15px 18px;overflow-x:auto;margin:1.2em 0}
+.md-body pre code{background:none;border:none;padding:0;font-size:.875em}
+.md-body blockquote{border-left:4px solid #0071e3;margin:1.2em 0;padding:.6em 1.2em;color:#6e6e73;background:#f0f0f2;border-radius:0 8px 8px 0}
+.md-body blockquote p{margin:0}
+.md-body table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93em}
+.md-body th,.md-body td{border:1px solid #d1d1d6;padding:8px 14px;text-align:left}
+.md-body th{background:#f0f0f2;font-weight:600}
+.md-body tr:nth-child(even) td{background:#f8f8fa}
+.md-body ul,.md-body ol{margin:.8em 0;padding-left:1.8em}
+.md-body li{margin:.35em 0}
+.md-body hr{border:none;border-top:2px solid #d1d1d6;margin:2em 0}
+.md-body img{max-width:100%;border-radius:8px}
+.mermaid-wrap{display:flex;justify-content:center;margin:1.5em 0;padding:16px;border:1px solid #d1d1d6;border-radius:8px;overflow-x:auto}
+.mermaid-wrap svg{max-width:100%}
+</style></head><body><div class="md-body">${mdBody.innerHTML}</div></body></html>`;
+  dl(URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' })), 'dokument.html');
+}
+function copyHTML() {
+  navigator.clipboard.writeText(mdBody.innerHTML).then(() => toast('HTML kopiert ✓'));
 }
 
 function dl(url, name) {
@@ -548,26 +877,67 @@ function dl(url, name) {
 }
 
 // ── Wiring ────────────────────────────────────────────────────────────────────
-document.getElementById('btn-theme') .addEventListener('click', () => applyTheme(!isDark));
-document.getElementById('btn-svg')   .addEventListener('click', exportSVG);
-document.getElementById('btn-png')   .addEventListener('click', exportPNG);
-document.getElementById('btn-zin')   .addEventListener('click', () => { zoom = Math.min(10, zoom * 1.25); applyTransform(); });
-document.getElementById('btn-zout')  .addEventListener('click', () => { zoom = Math.max(0.1, zoom / 1.25); applyTransform(); });
-document.getElementById('btn-zreset').addEventListener('click', resetView);
-document.getElementById('sel-example').addEventListener('change', function () {
-  const code = EXAMPLES[this.value];
-  if (code) { codeEl.value = code; updateLineNums(); scheduleRender(); }
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const next = tab.dataset.mode;
+    if (next === mode) return;
+    // persist current code
+    localStorage.setItem(`ds-${mode}`, codeEl.value);
+    // restore code for target mode
+    const saved = localStorage.getItem(`ds-${next}`);
+    codeEl.value = saved !== null ? saved : (next === 'markdown' ? MD_EXAMPLE : MM.flowchart);
+    updateLineNums(); updateStatus(); setMode(next);
+  });
+});
+
+$('btn-theme')    .addEventListener('click', () => applyTheme(!isDark));
+$('btn-svg')      .addEventListener('click', exportSVG);
+$('btn-png')      .addEventListener('click', exportPNG);
+$('btn-copy-svg') .addEventListener('click', copySVG);
+$('btn-md-dl')    .addEventListener('click', exportMD);
+$('btn-html-dl')  .addEventListener('click', exportHTML);
+$('btn-copy-html').addEventListener('click', copyHTML);
+$('btn-zin')      .addEventListener('click', () => { zoom = Math.min(10, zoom * 1.25); applyTransform(); });
+$('btn-zout')     .addEventListener('click', () => { zoom = Math.max(0.1, zoom / 1.25); applyTransform(); });
+$('btn-zreset')   .addEventListener('click', resetView);
+$('btn-focus')    .addEventListener('click', () => document.body.classList.toggle('focus'));
+$('btn-share')    .addEventListener('click', () => {
+  const h = toHash(mode, codeEl.value);
+  if (!h) return toast('Fehler beim Erstellen des Links.');
+  history.replaceState(null, '', location.pathname + '#' + h);
+  navigator.clipboard.writeText(location.href).then(() => toast('Link kopiert ✓'));
+});
+$('sel-example').addEventListener('change', function () {
+  const code = MM[this.value];
+  if (code) { codeEl.value = code; updateLineNums(); updateStatus(); scheduleRender(); }
   this.value = '';
 });
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
-initMermaid(isDark);
+// theme
+const savedTheme = localStorage.getItem('ds-theme');
+if (savedTheme) isDark = savedTheme === 'dark';
 document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
-document.getElementById('btn-theme').textContent = isDark ? '☀ Hell' : '☾ Dunkel';
+$('btn-theme').textContent = isDark ? '☀' : '☾';
+initMermaid(isDark);
 
-codeEl.value = localStorage.getItem('mermaid-code') || EXAMPLES.flowchart;
+// load from hash or localStorage
+let bootMode = 'mermaid';
+const hash = location.hash.slice(1);
+if (hash) {
+  const data = fromHash(hash);
+  if (data && data.code !== undefined) {
+    bootMode = data.m || 'mermaid';
+    codeEl.value = data.code;
+  }
+} else {
+  bootMode = localStorage.getItem('ds-mode') || 'mermaid';
+  const saved = localStorage.getItem(`ds-${bootMode}`);
+  codeEl.value = saved !== null ? saved : (bootMode === 'markdown' ? MD_EXAMPLE : MM.flowchart);
+}
 updateLineNums();
-render();
+updateStatus();
+setMode(bootMode);
 
 })();
 </script>
